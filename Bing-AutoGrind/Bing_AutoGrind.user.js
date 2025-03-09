@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         AutoGrind: Intelligent Bing Rewards Auto-Grinder
+// @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
 // @version      5.2.4
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
@@ -7,6 +7,7 @@
 // @author       Jery
 // @match        https://www.bing.com/search*
 // @match        https://rewards.bing.com/*
+// @match        https://www.bing.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @license      MIT
@@ -21,7 +22,7 @@ var TIMEOUT_RANGE = GM_getValue("timeout-range", [5, 10]);	// Randomize the time
 var COOLDOWN_TIMEOUT = GM_getValue("cooldown-timeout", 15); // Cooldown_Timeout between searches
 var UNDER_COOLDOWN = GM_getValue("under-cooldown", false);	// Workaround for cooldown restriction
 var OPEN_RANDOM_LINKS = GM_getValue("open-random-links", true);	// Simulate real human searcg by opening links
-var COLLECT_DAILY_ACTIVITY = GM_getValue("collect-daily-activity", false);	// Automatically collect daily activity points from bingo rewards dashboard page
+var COLLECT_DAILY_ACTIVITY = GM_getValue("collect-daily-activity", true);	// Automatically collect daily activity points from bingo rewards dashboard page
 var AUTO_CLOSE_TABS = GM_getValue("auto-close-tabs", true);	// Automatically close any tabs/windows opened by the script
 
 var TIMEOUT = (Math.floor(Math.random() * (TIMEOUT_RANGE[1] - TIMEOUT_RANGE[0]) * 1000) + TIMEOUT_RANGE[0] * 1000);	// Randomize the timeout with given range
@@ -114,16 +115,43 @@ autoSearchContainer.classList.add("auto-search-container");
 
 const searchIcon = document.createElement("div");
 searchIcon.classList.add("search-icon");
-if(!isRewardPage) searchIcon.innerHTML = `<a style="font-size: 25px">🔍</a><span>Auto-Search</span>`;
+if(!isRewardPage) searchIcon.innerHTML = `
+    <span style="font-size: 25px; font-family: 'Segoe UI Symbol'">🔍</span>
+    <span>Auto-Search</span>
+`;
 searchIcon.title = "Start Auto-Search!!";
 searchIcon.addEventListener("click", startSearch);
 
 const settingsIcon = document.createElement("div");
 settingsIcon.classList.add("settings-icon");
-if(!isRewardPage) settingsIcon.innerHTML = `<a style="font-size: 20px;">⚙️</a><span>Configure</span>`;
+if(!isRewardPage) settingsIcon.innerHTML = `
+    <span style="font-size: 20px; font-family: 'Segoe UI Symbol'">⚙️</span>
+    <span>Configure</span>
+`;
+
+const stopIcon = document.createElement("div");
+stopIcon.classList.add("stop-icon");
+if(!isRewardPage) stopIcon.innerHTML = `
+    <span style="font-size: 22px; font-family: 'Segoe UI Symbol'">⏹</span>
+    <span>Stop</span>
+`;
+stopIcon.title = "Stop Auto-Search";
+stopIcon.style.display = "none"; // Hide by default
+stopIcon.addEventListener("click", () => {
+    if (confirm("Stop auto-searching?")) {
+        searches = [];
+        GM_setValue("searches", []);
+        window.location.reload();
+    }
+});
+const remainingSearches = GM_getValue("searches", []);
+if (remainingSearches.length > 0) {
+    stopIcon.style.display = "flex";
+}
 
 autoSearchContainer.appendChild(searchIcon);
 autoSearchContainer.appendChild(settingsIcon);
+autoSearchContainer.appendChild(stopIcon);
 
 setTimeout(() => {
     if (searchIcon.textContent.includes("Auto-Search")) searchIcon.classList.add("shrink")
@@ -234,9 +262,14 @@ document.getElementById("under-cooldown").addEventListener("change", (event) => 
  * @param {string} classlist - The classlist to apply to the icon.
  */
 function updateIcon(content, classlist="searching") {
-	searchIcon.classList.add(classlist);
-	settingsIcon.classList.add(classlist);
-	searchIcon.querySelector("span").textContent = content;
+    searchIcon.classList.add(classlist);
+    settingsIcon.classList.add(classlist);
+
+    // Get the second span element (the text one) instead of the first
+    const spans = searchIcon.querySelectorAll("span");
+    if (spans.length > 1) {
+        spans[1].textContent = content;
+    }
 }
 
 
@@ -250,11 +283,40 @@ function updateConfigVariable(id, value) {
 	if (id === "max-searches") MAX_SEARCHES = parseInt(value);
 	else if (id === "cooldown-timeout") COOLDOWN_TIMEOUT = parseInt(value);
 	else if (id === "under-cooldown") UNDER_COOLDOWN = value == "true";
-  }
+}
 
 /*=============================================*\
 |* 				HELPER FUNCTIONS			   *|
 \*=============================================*/
+/**
+ * Check if the current page appears to be an error page.
+ * @returns {boolean} True if the page appears to be an error page, false otherwise.
+ */
+function isErrorPage() {
+    return document.title.includes("Error") ||
+           document.querySelector(".errorMessage") !== null ||
+           document.querySelector(".b_no") !== null ||
+           document.querySelector(".b_caption p") === null;
+}
+
+/**
+ * Generate fallback search terms when no content can be extracted from the page.
+ * @returns {Array} An array of fallback search terms.
+ */
+function getFallbackSearchTerms() {
+    const fallbackTerms = [
+        "weather today", "local news", "sports scores", "recipes", "music charts",
+        "movies", "tech news", "health tips", "science facts", "travel destinations",
+        "book reviews", "finance market", "education resources", "history today",
+        "environment news", "art exhibitions", "food recipes", "gaming news",
+        "shopping deals", "fashion trends", "home improvement", "gardening tips",
+        "pet care", "exercise routines", "current events"
+    ];
+
+    // Shuffle the array to get random terms
+    return fallbackTerms.sort(() => Math.random() - 0.5);
+}
+
 /**
  * Perform a search for dynamically extracted random words from descriptions.
  * This function finds all the result elements on the page and extracts random words from their text content.
@@ -262,59 +324,89 @@ function updateConfigVariable(id, value) {
  * The number of searches is limited to [MAX_SEARCHES].
  * If [COLLECT_DAILY_ACTIVITY] is enabled, the Bing rewards page is opened in a new tab to collect daily activity points.
  * A search term is opened in the current tab to start the search process.
+ * Enhanced with error detection and fallback search terms.
  */
 function startSearch() {
+  stopIcon.style.display = "flex";
 	searches = [];
 	GM_setValue("searches", searches);
 	tabsToClose = [];
 	GM_setValue("tabsToClose", tabsToClose);
-	const resultElements = document.querySelectorAll(".b_caption p");
-	while (searches.length < MAX_SEARCHES) {
-		resultElements.forEach((element) => {
-			const text = element.textContent.trim().split(/\s+/);
-			for (let i = 0; i < text.length; i += Math.floor(Math.random() * 5) + 1) {
-				const chunk = text.slice(i, i + Math.floor(Math.random() * 5) + 1).join(" ");
-				if (chunk && chunk !== "...") searches.push(chunk);
-				if (searches.length >= MAX_SEARCHES) break;
-			}
-			if (searches.length >= MAX_SEARCHES) return;
-		});
-	}
-	searches = [...new Set(searches)]; // Remove duplicates
-	searches = searches.slice(0, MAX_SEARCHES); // Extract up to MAX_SEARCHES
-	console.log(searches);
 
+	const resultElements = document.querySelectorAll(".b_caption p");
+
+	// Check if we're on an error page or if there are no search results
+	if (isErrorPage() || resultElements.length === 0) {
+	    console.log("No search results found or on error page. Using fallback search terms.");
+	    // Use fallback search terms
+	    searches = getFallbackSearchTerms().slice(0, MAX_SEARCHES);
+	} else {
+    	// Extract terms from search results
+    	while (searches.length < MAX_SEARCHES) {
+    		resultElements.forEach((element) => {
+    			const text = element.textContent.trim().split(/\s+/);
+    			for (let i = 0; i < text.length; i += Math.floor(Math.random() * 5) + 1) {
+    				const chunk = text.slice(i, i + Math.floor(Math.random() * 5) + 1).join(" ");
+    				if (chunk && chunk !== "...") searches.push(chunk);
+    				if (searches.length >= MAX_SEARCHES) break;
+    			}
+    			if (searches.length >= MAX_SEARCHES) return;
+    		});
+
+    		// If we couldn't extract enough terms, add some fallback terms
+    		if (searches.length < MAX_SEARCHES) {
+    		    const neededTerms = MAX_SEARCHES - searches.length;
+    		    searches = [...searches, ...getFallbackSearchTerms().slice(0, neededTerms)];
+    		}
+    	}
+
+    	searches = [...new Set(searches)]; // Remove duplicates
+    	searches = searches.slice(0, MAX_SEARCHES); // Extract up to MAX_SEARCHES
+	}
+
+	console.log("Search terms:", searches);
 	GM_setValue("searches", searches);
-	
+
 	if (COLLECT_DAILY_ACTIVITY) window.open(`https://rewards.bing.com/?ref=rewardspanel`, "_blank");
 	if (AUTO_CLOSE_TABS) addTabToClose("https://rewards.bing.com/?ref=rewardspanel");
-	
+
 	const nextSearchTerm = searches.pop();
-	
+
 	GM_setValue("searches", searches);
-	addTabToClose(`https://www.bing.com/search?go=Search&q=${encodeURI(searches[0])}&qs=ds&form=QBRE`);
-	window.open(`https://www.bing.com/search?go=Search&q=${nextSearchTerm}&qs=ds&form=QBRE`, "_self");
+	addTabToClose(`https://www.bing.com/search?go=Search&q=${encodeURIComponent(searches[0])}&qs=ds&form=QBRE`);
+	window.location.href = `https://www.bing.com/search?go=Search&q=${encodeURIComponent(nextSearchTerm)}&qs=ds&form=QBRE`;
 }
 
 /**
  * Wait for elements to appear on the page and execute a callback function when they are found.
  * This function repeatedly checks for the presence of the specified selectors on the page.
  * Once any of the selectors is found, the callback function is called with the selector as a parameter.
+ * Enhanced with a timeout to prevent waiting indefinitely.
  * @param {Array} selectors - The selectors to wait for.
  * @param {Function} callback - The callback function to execute when the selectors are found.
+ * @param {number} timeout - Optional timeout in milliseconds, after which callback will be called with null.
  */
-function waitForElements(selectors, callback) {
-	if (selectors == null) {
-		callback(null);
-		return;
-	}
-	for (let selector of selectors) {
-		if (document.querySelector(selector)) {
-			callback(selector);
-			return;
-		}
-	}
-	setTimeout(() => waitForElements(selectors, callback), 500);
+function waitForElements(selectors, callback, timeout = 10000) {
+    const startTime = Date.now();
+
+    function checkElements() {
+        // If selectors is null or we've waited too long, proceed anyway
+        if (selectors == null || (Date.now() - startTime > timeout)) {
+            console.log("Element wait timed out or no selectors provided, proceeding anyway");
+            callback(null);
+            return;
+        }
+
+        for (let selector of selectors) {
+            if (document.querySelector(selector)) {
+                callback(selector);
+                return;
+            }
+        }
+        setTimeout(checkElements, 500);
+    }
+
+    checkElements();
 }
 
 /**
@@ -345,118 +437,172 @@ function addTabToClose(tab, timeout=5000) {
  * In case of mobile, the script skips searching for the element.
  */
 try {
+// FIRST CHECK: Detect if we're stuck on the Bing home page
+if (window.location.href.startsWith("https://www.bing.com/?scope=web&cc=GB&FORM=QBRE")) {
+    // Only act if we have remaining searches
+    const remainingSearches = GM_getValue("searches", []);
+    if (remainingSearches.length > 0) {
+        console.log("Detected stuck page, resuming searches...");
+
+        setTimeout(() => {
+            const nextTerm = remainingSearches.pop();
+            GM_setValue("searches", remainingSearches);
+
+            // Use more reliable navigation
+            window.location.href = `https://www.bing.com/search?q=${
+                encodeURIComponent(nextTerm)
+            }&qs=ds&form=QBRE`;
+        }, 3000); // Short delay before recovery
+
+        return; // Stop normal script execution
+    }
+}
 if (isSearchPage) {
 	// Add the auto-search icons to the top left corner of the page
 	document.body.appendChild(autoSearchContainer);
 
-	let pointsElems = isMobile ? null : ["#id_rc", ".points-container"];
-	waitForElements(pointsElems, function (pointsElem) {
-		/**
-		 * If the current URL contains the "&form=STARTSCRIPT" parameter,
-		 * the script automatically extracts words from the page and starts the search.
-		 * This is a workaround for automating the script locally, without the need for
-		 * clicking the start icon.
-		 */
-		if (window.location.href.includes("&form=STARTSCRIPT")) {
-			startSearch();
-		}
-		/**
-		 * If the current URL contains the "&qs=ds&form=QBRE" parameter (which I've noticed that bing sets for all searches),
-		 * and the [searches] array is not empty, the script automatically waits
-		 * for a few secs (on mobile, it waits fixed time and on desktop it waits until points element is updated),
-		 * and then proceeds to the next search in the current tab.
-		 */
-		else if (searches.length > 0 && window.location.href.includes("&qs=ds&form=QBRE")) {
-			updateIcon(`${searches.length} left`);
-			let targetNode = document.querySelector(pointsElem);
-			const observerTimeout = 4000;
+    // Check if we're on an error page and have searches left to do
+    if (isErrorPage() && searches.length > 0) {
+        console.log("Detected error page, continuing to next search");
+        // Wait a short moment then continue to next search
+        setTimeout(() => {
+            const nextTerm = searches.pop();
+            GM_setValue("searches", searches);
+            window.location.href = `https://www.bing.com/search?go=Search&q=${encodeURIComponent(nextTerm)}&qs=ds&form=QBRE`;
+        }, 2000);
+    } else {
+    	let pointsElems = isMobile ? null : ["#id_rc", ".points-container"];
+    	waitForElements(pointsElems, function (pointsElem) {
+    		/**
+    		 * If the current URL contains the "&form=STARTSCRIPT" parameter,
+    		 * the script automatically extracts words from the page and starts the search.
+    		 * This is a workaround for automating the script locally, without the need for
+    		 * clicking the start icon.
+    		 */
+    		if (window.location.href.includes("&form=STARTSCRIPT")) {
+    			startSearch();
+    		}
+    		/**
+    		 * If the current URL contains the "&qs=ds&form=QBRE" parameter (which I've noticed that bing sets for all searches),
+    		 * and the [searches] array is not empty, the script automatically waits
+    		 * for a few secs (on mobile, it waits fixed time and on desktop it waits until points element is updated),
+    		 * and then proceeds to the next search in the current tab.
+    		 */
+    		else if (searches.length > 0 && window.location.href.includes("&qs=ds&form=QBRE")) {
+    			updateIcon(`${searches.length} left`);
+    			let targetNode = document.querySelector(pointsElem);
+    			const observerTimeout = 4000;
 
-			let observerOptions = {characterData: true, childList: true, subtree: true};
+    			let observerOptions = {characterData: true, childList: true, subtree: true};
 
-			if (pointsElem != null) {
-				let oldTextContent = targetNode.textContent.trim();
+    			if (pointsElem != null && targetNode != null) {
+    				let oldTextContent = targetNode.textContent.trim();
 
-				let observer = new MutationObserver((mutationsList, observer) => {
-					for (let mutation of mutationsList) {
-						if (mutation.type == "childList" || mutation.type == "characterData") {
-							let newTextContent = targetNode.textContent.trim();
-							if (newTextContent != oldTextContent) {
-								gotoNextSearch();
-								observer.disconnect();
-								clearTimeout(timeoutId);
-								break;
-							}
-						}
-					}
-				});
+    				let observer = new MutationObserver((mutationsList, observer) => {
+    					for (let mutation of mutationsList) {
+    						if (mutation.type == "childList" || mutation.type == "characterData") {
+    							let newTextContent = targetNode.textContent.trim();
+    							if (newTextContent != oldTextContent) {
+    								gotoNextSearch();
+    								observer.disconnect();
+    								clearTimeout(timeoutId);
+    								break;
+    							}
+    						}
+    					}
+    				});
 
-				observer.observe(targetNode, observerOptions);
-			}
+    				observer.observe(targetNode, observerOptions);
+    			}
 
-			// Store the timeout ID so it can be cleared by the observer
-			let timeoutId = setTimeout(() => {
-				gotoNextSearch();
-			}, observerTimeout);
+    			// Store the timeout ID so it can be cleared by the observer
+    			let timeoutId = setTimeout(() => {
+    				gotoNextSearch();
+    			}, observerTimeout);
+    		}
+    	}, 5000); // Add timeout of 5 seconds
+    }
+}
 
-			/**
-			 * Go to the next search after a timeout.
-			 * This function updates the icon's appearance with a countdown timer.
-			 * After the timeout, it opens the next search in the current tab and updates the searches array in local storage.
-			 * If [OPEN_RANDOM_LINKS] is enabled, it also opens a random link from the search results in an iframe.
-			 * It's been observed that some links like britannica.com refuse to open in an iframe and end up opening in current window.
-			 * As a workaround, such domains are excluded from being opened in an iframe.
-			 */
-			function gotoNextSearch() {
-				countdownTimer(TIMEOUT / 1000);
 
-				if (OPEN_RANDOM_LINKS) {
-					try {
-						let searchLinks = isMobile
-						? document.querySelectorAll(".b_algoheader > a")
-						: document.querySelectorAll("li.b_algo h2 a");
+/**
+ * Go to the next search after a timeout.
+ * This function updates the icon's appearance with a countdown timer.
+ * After the timeout, it opens the next search in the current tab and updates the searches array in local storage.
+ * If [OPEN_RANDOM_LINKS] is enabled, it also opens a random link from the search results in an iframe.
+ * It's been observed that some links like britannica.com refuse to open in an iframe and end up opening in current window.
+ * As a workaround, such domains are excluded from being opened in an iframe.
+ * Enhanced with error detection and handling.
+ */
+function gotoNextSearch() {
 
-						// workaround for the britannica bug.
-						const excludeDomains = ["britannica.com", "sunshineseeker.com"];
-						searchLinks = Array.from(searchLinks).filter(link => !excludeDomains.some(domain => link.closest(".b_algo").querySelector(".b_tpcn div.tpmeta").innerText.includes(domain)));
-						let randLink = searchLinks[Math.floor(Math.random() * searchLinks.length)];
-						
-						let iframe = document.createElement("iframe");
-						iframe.name = "randLinkFrame";
-						iframe.style.width = "100%";
-						iframe.style.height = "600px";
-						randLink.parentElement.appendChild(iframe);
-						randLink.target = "randLinkFrame";
-						randLink.click();
-					} catch (e) {
-						console.error(e);
-					}
-				}
+    countdownTimer(TIMEOUT / 1000);
 
-				setTimeout(() => {
-					window.open(`https://www.bing.com/search?go=Search&q=${encodeURI(searches.pop())}&qs=ds&form=QBRE`, "_self");
-					// document.querySelector("textarea.b_searchbox").value = searches.pop();
-					// document.querySelector("input.b_searchboxSubmit").click();
-					GM_setValue("searches", searches);
-				}, TIMEOUT);
-			}
+    if (OPEN_RANDOM_LINKS) {
+        try {
+            let searchLinks = isMobile
+                ? document.querySelectorAll(".b_algoheader > a")
+                : document.querySelectorAll("li.b_algo h2 a");
 
-			/**
-			 * Start a countdown timer and update the icon's appearance.
-			 * This function updates the icon's appearance every second with the remaining time in the countdown.
-			 * @param {number} count - The duration of the countdown in seconds.
-			 */
-			function countdownTimer(count) {
-				let c = parseInt(count);
-				const intervalId = setInterval(() => {
-					updateIcon(c, "counting");
-					if (c == 0) {
-						clearInterval(intervalId);
-					}
-					c--;
-				}, 1000);
-			}
-		}
-	});
+            // Check if we have search links - if not, might be an error page
+            if (searchLinks.length === 0) {
+                console.log("No search links found, possibly on an error page. Skipping link opening.");
+            } else {
+                // workaround for the britannica bug.
+                const excludeDomains = ["britannica.com", "sunshineseeker.com"];
+                searchLinks = Array.from(searchLinks).filter(link => {
+                    const metaElement = link.closest(".b_algo")?.querySelector(".b_tpcn div.tpmeta");
+                    return metaElement && !excludeDomains.some(domain => metaElement.innerText.includes(domain));
+                });
+
+                // Only attempt to open a link if we found valid links
+                if (searchLinks.length > 0) {
+                    let randLink = searchLinks[Math.floor(Math.random() * searchLinks.length)];
+
+                    let iframe = document.createElement("iframe");
+                    iframe.name = "randLinkFrame";
+                    iframe.style.width = "100%";
+                    iframe.style.height = "600px";
+                    randLink.parentElement.appendChild(iframe);
+                    randLink.target = "randLinkFrame";
+                    randLink.click();
+                }
+            }
+        } catch (e) {
+            console.error("Error opening random link:", e);
+        }
+    }
+
+    setTimeout(() => {
+        // Check if we still have searches left
+        if (searches.length > 0) {
+            const nextTerm = searches.pop();
+            GM_setValue("searches", searches);
+            window.open(`https://www.bing.com/search?go=Search&q=${encodeURI(nextTerm)}&qs=ds&form=QBRE`, "_self");
+        } else {
+            console.log("All searches completed!");
+            // Maybe go to rewards page to check if points were collected
+            if (COLLECT_DAILY_ACTIVITY) {
+                window.open(`https://rewards.bing.com/?ref=rewardspanel`, "_self");
+            }
+        }
+    }, TIMEOUT);
+}
+
+/**
+ * Start a countdown timer and update the icon's appearance.
+ * This function updates the icon's appearance every second with the remaining time in the countdown.
+ * @param {number} count - The duration of the countdown in seconds.
+ */
+function countdownTimer(count) {
+    let c = parseInt(count);
+    const intervalId = setInterval(() => {
+        updateIcon(c, "counting");
+        if (c == 0) {
+            clearInterval(intervalId);
+        }
+        c--;
+    }, 1000);
 }
 
 
@@ -473,6 +619,7 @@ if (isRewardPage) {
 		});
 	}
 }
+
 
 
 /**
@@ -496,118 +643,217 @@ if (AUTO_CLOSE_TABS) {
     }
 }
 
+(function() {
+    // Periodically check for quiz elements on the page.
+    function checkForQuiz() {
+        if (document.getElementById('quizWelcomeContainer') || document.getElementById('rqStartQuiz')) {
+            startQuiz();
+        } else if (document.querySelector('.rqOption, .btOption, .btOptionBox, #nextQuestionbtn, .quizContinueButton')) {
+            handleQuizQuestions();
+        } else {
+            setTimeout(checkForQuiz, 1000);
+        }
+    }
+
+    function startQuiz() {
+        // Click the start button if present (supports both welcome container and direct start button)
+        const startButton = document.querySelector('#quizWelcomeContainer button, #rqStartQuiz');
+        if (startButton) {
+            console.log("Starting quiz by clicking the start button.");
+            startButton.click();
+        }
+        setTimeout(handleQuizQuestions, 2000);
+    }
+
+    function handleQuizQuestions() {
+        // First, check if the quiz finished container is visible
+        const completeElem = document.querySelector('#quizCompleteContainer, .quizComplete');
+        if (completeElem && completeElem.offsetParent !== null) {
+            console.log("Quiz completed.");
+            if (AUTO_CLOSE_TABS) {
+                setTimeout(() => window.close(), 3000);
+            }
+            return;
+        }
+
+        // Handle multiple choice questions (.rqOption and .btOption)
+        const mcOptions = document.querySelectorAll('.rqOption, .btOption');
+        if (mcOptions.length > 0) {
+            const randomOption = mcOptions[Math.floor(Math.random() * mcOptions.length)];
+            console.log("Selecting multiple choice option: " + randomOption.value);
+            randomOption.click();
+            setTimeout(handleQuizQuestions, 2000);
+            return;
+        }
+
+        // Handle true/false questions via .btOptionBox
+        const tfOptions = document.querySelectorAll('.btOptionBox');
+        if (tfOptions.length > 0) {
+            const randomOption = tfOptions[Math.floor(Math.random() * tfOptions.length)];
+            console.log("Selecting true/false option.");
+            randomOption.click();
+            setTimeout(handleQuizQuestions, 2000);
+            return;
+        }
+
+        // Handle "Next" buttons (if any)
+        const nextButton = document.querySelector('#nextQuestionbtn, .quizContinueButton');
+        if (nextButton) {
+            console.log("Clicking the Next button.");
+            nextButton.click();
+            setTimeout(handleQuizQuestions, 2000);
+            return;
+        }
+
+        // If nothing is detected, check again shortly.
+        setTimeout(handleQuizQuestions, 1000);
+    }
+
+    window.addEventListener('load', checkForQuiz);
+})();
 /*=============================================*\
 |*					CSS STYLES				   *|
 \*=============================================*/
 
+
 const stylesheet = Object.assign(document.createElement("style"), {textContent: `
+    /* Main container */
     .auto-search-container {
         position: fixed;
         top: 90px;
         left: 20px;
-		display: inline-grid;
-		align-items: flex-start;
-		z-index: 1000;
+        display: inline-grid;
+        align-items: flex-start;
+        z-index: 1000;
     }
+
     .auto-search-container span {
-		margin-left: 5px;
+        margin-left: 5px;
     }
-    .search-icon, .settings-icon {
+
+    /* Common icon styles */
+    .search-icon, .settings-icon, .stop-icon {
         display: flex;
         align-items: center;
-		overflow: hidden;
+        overflow: hidden;
         cursor: pointer;
         border-radius: 20px;
         background-color: lightgray;
         padding: 2px 10px 2px 0px;
         transition: all 0.5s ease;
     }
-    .b_drk .search-icon,
-    .b_drk .settings-icon,
-    .b_dark .search-icon,
-    .b_dark .settings-icon {
+
+    /* Dark mode styles */
+    .b_drk .search-icon, .b_drk .settings-icon, .b_drk .stop-icon,
+    .b_dark .search-icon, .b_dark .settings-icon, .b_dark .stop-icon {
         background-color: #333;
     }
+
+    /* Search icon specific */
     .search-icon.shrink {
         width: 27px;
         transition: width 0.5s;
     }
+
     .search-icon.shrink:hover {
         width: 100%;
     }
+
+    /* Settings icon specific */
     .settings-icon {
-		opacity: 0;
+        opacity: 0;
         width: 23px;
         transition: all 0.5s ease;
     }
-	.auto-search-container:hover .settings-icon,
-	.auto-search-container .settings-icon.searching {
-		opacity: 1;
-	}
+
+    .auto-search-container:hover .settings-icon,
+    .auto-search-container .settings-icon.searching {
+        opacity: 1;
+    }
+
     .settings-icon:hover {
         width: 100%;
     }
+
+    /* Stop icon specific */
+    .stop-icon {
+        color: red;
+    }
+
+    .stop-icon:hover {
+        background-color: #ffe5e5;
+    }
+
+    /* State styles */
     .search-icon.searching {
         background-color: lightblue !important;
     }
+
     .b_drk .search-icon.searching,
     .b_dark .search-icon.searching {
         background-color: midnightblue !important;
     }
+
     .search-icon.counting {
         background-color: lightgreen !important;
     }
+
     .b_drk .search-icon.counting,
     .b_dark .search-icon.counting {
         background-color: green !important;
     }
-	
 
-	/******** Settings Overlay *********/
+    /* Settings Overlay */
+    .b_drk .settings-overlay > div,
+    .b_dark .settings-overlay > div {
+        background-color: black !important;
+    }
 
-	.b_drk .settings-overlay > div,
-	.b_dark .settings-overlay > div {
-		background-color: black !important;
-	}
-	.settings-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin: 10px 0;
-	}
-	.settings-item:hover {
-		border: ivory groove 1px;
-		border-radius: 10px;
-	}
-	.settings-item-name {
-		flex-basis: 20%;
-		text-align: left;
-	}
-	.settings-item-input {
-		flex-basis: 10%;
-    	text-align: center;
-	}
-	.settings-item-value {
-		flex-basis: 20%;
-		text-align: center;
-	}
-	.settings-item-description {
-		flex-basis: 40%;
-		height: 0;
-		width: 50vw;
-		padding: 5px 10px 20px 10px;
-		border: grey solid 1px;
-		border-radius: 10px;
-		overflow: hidden;
-		transition: height 0.3s ease;
-	}
-	.settings-item:hover .settings-item-description {
-		height: 60px;
-		overflow-y: scroll;
-		place-content: center;
-		text-align: center;
-   		padding: 20px;
-	}
+    .settings-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 10px 0;
+    }
+
+    .settings-item:hover {
+        border: ivory groove 1px;
+        border-radius: 10px;
+    }
+
+    .settings-item-name {
+        flex-basis: 20%;
+        text-align: left;
+    }
+
+    .settings-item-input {
+        flex-basis: 10%;
+        text-align: center;
+    }
+
+    .settings-item-value {
+        flex-basis: 20%;
+        text-align: center;
+    }
+
+    .settings-item-description {
+        flex-basis: 40%;
+        height: 0;
+        width: 50vw;
+        padding: 5px 10px 20px 10px;
+        border: grey solid 1px;
+        border-radius: 10px;
+        overflow: hidden;
+        transition: height 0.3s ease;
+    }
+
+    .settings-item:hover .settings-item-description {
+        height: 60px;
+        overflow-y: scroll;
+        place-content: center;
+        text-align: center;
+        padding: 20px;
+    }
 `})
 if(!isRewardPage) document.head.appendChild(stylesheet);
 } catch (e) {
