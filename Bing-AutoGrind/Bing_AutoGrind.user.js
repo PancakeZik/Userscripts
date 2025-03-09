@@ -4,7 +4,7 @@
 // @version      5.2.5
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
-// @author       Jery(modified by JP)
+// @author       Jery (modified by JP)
 // @match        https://www.bing.com/search*
 // @match        https://rewards.bing.com/*
 // @match        https://www.bing.com/*
