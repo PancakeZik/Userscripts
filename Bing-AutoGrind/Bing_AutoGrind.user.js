@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
-// @namespace    https://github.com/jeryjs/
+// @namespace    https://github.com/PancakeZik/
 // @version      5.2.5
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
@@ -638,7 +638,7 @@ if (AUTO_CLOSE_TABS) {
 			window.close()
 
 			// IF the tab still hasnt closed, take the user to close-this-window page
-			window.open(`https://jeryjs.github.io/Userscripts/Bing-AutoGrind/close-this-window.html?bing-autogrind=true`, "_self");
+			window.open(`https://raw.githubusercontent.com/PancakeZik/Userscripts/refs/heads/main/Bing-AutoGrind/close-this-window.html?bing-autogrind=true`, "_self");
 		}, tabToClose.timeout);
     }
 }
