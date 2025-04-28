@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
-// @version      5.3.5
+// @version      5.3.6
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
 // @author       Jery (modified by JP)
@@ -611,13 +611,39 @@ function countdownTimer(count) {
  * To prevent opening new tabs, points are opened into an iframe inside each point card.
  */
 if (isRewardPage) {
-	if (COLLECT_DAILY_ACTIVITY) {
-		// Wait for the page to load the point cards first
-		window.onload = () => document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium)").forEach((card) => {
-			addTabToClose(card.href);
-			card.click();
-		});
-	}
+    if (COLLECT_DAILY_ACTIVITY) {
+        // Wait for the page to load the point cards first
+        window.onload = () => {
+            // Select all potentially clickable, uncompleted cards
+            const allPotentialCards = document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium)");
+
+            // Filter out the cards that are part of the next day's set
+            const cardsToClick = Array.from(allPotentialCards).filter(card => {
+                // Find the closest ancestor element that has an 'item' attribute starting with '$ctrl.dailySets['
+                // This attribute is usually on the 'mee-rewards-daily-set-item-content' element
+                const itemAncestor = card.closest("[item^='$ctrl.dailySets[']");
+
+                // If there's no such ancestor, it's not a daily set item, so we should click it.
+                if (!itemAncestor) {
+                    return true;
+                }
+
+                // If there is an ancestor, get its 'item' attribute value
+                const itemValue = itemAncestor.getAttribute('item');
+
+                // Check if the item value starts with '$ctrl.dailySets[1]' (indicating next day)
+                // If it does, we return false to filter it out. Otherwise (e.g., starts with [0] or something else), return true.
+                return !(itemValue && itemValue.startsWith('$ctrl.dailySets[1]'));
+            });
+
+            // Now, iterate only over the filtered cards
+            cardsToClick.forEach((card) => {
+                console.log("AutoGrind: Clicking eligible reward card:", card.getAttribute('aria-label') || card.href); // Optional logging
+                addTabToClose(card.href);
+                card.click();
+            });
+        };
+    }
 }
 
 
