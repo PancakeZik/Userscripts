@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
-// @version      5.3.7
+// @version      5.3.8
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
 // @author       Jery (modified by JP)
@@ -610,74 +610,111 @@ function countdownTimer(count) {
  * If the current page is the Bing rewards page, the script automatically clicks the unclaimed daily points.
  * To prevent opening new tabs, points are opened into an iframe inside each point card.
  */
-if (isRewardPage) {
-    if (COLLECT_DAILY_ACTIVITY) {
-        // Use a setTimeout after window.onload to give dynamic content more time to render
-        window.onload = () => {
-            console.log("AutoGrind: Rewards page loaded. Waiting 3 seconds for dynamic content...");
-            setTimeout(() => {
-                console.log("AutoGrind: Starting card search...");
-                // Select all potentially clickable, uncompleted cards
-                const allPotentialCards = document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium)");
-                console.log(`AutoGrind: Found ${allPotentialCards.length} potential cards with the Add icon.`);
+if (isRewardPage && COLLECT_DAILY_ACTIVITY) {
 
-                if (allPotentialCards.length === 0) {
-                    console.log("AutoGrind: No cards found to click. Either all done or elements haven't rendered correctly.");
-                    return; // Exit if nothing found
-                }
+    const maxWaitTime = 20000; // Maximum time to wait in milliseconds (20 seconds)
+    const checkInterval = 500;  // How often to check in milliseconds (0.5 seconds)
+    let timeWaited = 0;
+    let checkTimer = null;
 
-                // Filter out the cards that are part of the next day's set
-                const cardsToClick = Array.from(allPotentialCards).filter(card => {
-                    // Find the closest ancestor element that has an 'item' attribute
-                    // Use a more specific selector if possible, like 'mee-rewards-daily-set-item-content'
-                    const itemAncestor = card.closest("mee-rewards-daily-set-item-content[item]"); // Be more specific
+    function processRewardCards() {
+        console.log("AutoGrind: Starting card processing...");
+        // Select all potentially clickable, uncompleted cards
+        // Use a selector that targets *any* clickable reward item structure, not just daily sets initially
+        const allPotentialCards = document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium), mee-card[priority='1'] a:has(span.mee-icon-AddMedium)"); // Added mee-card check for potentially other types
+        console.log(`AutoGrind: Found ${allPotentialCards.length} potential cards with the Add icon.`);
 
-                    // If there's no such ancestor, it's likely not a daily set item (e.g., punch card, other activity)
-                    // We definitely want to click these.
-                    if (!itemAncestor) {
-                        // console.log("AutoGrind: Keeping card (not a daily set item):", card.getAttribute('aria-label') || card.href);
-                        return true;
-                    }
+        if (allPotentialCards.length === 0) {
+            console.log("AutoGrind: No cards found to click after waiting. Either all done or elements haven't rendered correctly.");
+            return; // Exit if nothing found
+        }
 
-                    // If there is an ancestor, get its 'item' attribute value
-                    const itemValue = itemAncestor.getAttribute('item');
-                    // console.log(`AutoGrind: Checking card item value: ${itemValue} for card:`, card.getAttribute('aria-label') || card.href);
+        // Filter out the cards that are part of the next day's set
+        const cardsToClick = Array.from(allPotentialCards).filter(card => {
+            // Find the closest ancestor element that has an 'item' attribute identifying it as a daily set item
+            const itemAncestor = card.closest("mee-rewards-daily-set-item-content[item]");
 
-                    // IMPORTANT: Check if itemValue is not null and actually starts with '$ctrl.dailySets[1]' (NO single quotes inside)
-                    const isNextDay = itemValue && itemValue.startsWith('$ctrl.dailySets[1]');
+            // If it's not within a daily set item container, keep it (e.g., punch cards, weekly sets)
+            if (!itemAncestor) {
+                // console.log("AutoGrind: Keeping card (not a daily set item based on ancestor):", card.getAttribute('aria-label') || card.href);
+                return true;
+            }
 
-                    if (isNextDay) {
-                         // console.log("AutoGrind: Filtering out (next day card):", card.getAttribute('aria-label') || card.href);
-                         return false; // Filter out next day card
-                    } else {
-                         // console.log("AutoGrind: Keeping card (today's daily set or other):", card.getAttribute('aria-label') || card.href);
-                         return true; // Keep today's card or any other structure
-                    }
-                });
+            // If it is a daily set item, get its 'item' attribute value
+            const itemValue = itemAncestor.getAttribute('item');
+            // console.log(`AutoGrind: Checking daily set card item value: ${itemValue} for card:`, card.getAttribute('aria-label') || card.href);
 
-                console.log(`AutoGrind: Found ${cardsToClick.length} cards to click after filtering.`);
+            // Check if itemValue is not null and actually starts with '$ctrl.dailySets[1]' (NO single quotes inside)
+            const isNextDay = itemValue && itemValue.startsWith('$ctrl.dailySets[1]');
 
-                // Now, iterate only over the filtered cards
-                cardsToClick.forEach((card, index) => {
-                    console.log(`AutoGrind: Clicking eligible reward card ${index + 1}/${cardsToClick.length}:`, card.getAttribute('aria-label') || card.href);
-                    // Check if addTabToClose exists and is a function before calling
-                    if (typeof addTabToClose === 'function') {
-                         addTabToClose(card.href); // Keep adding to close list if needed
-                    } else {
-                         console.error("AutoGrind: addTabToClose function not found!");
-                    }
-                    // Use a small delay between clicks if opening multiple tabs quickly causes issues
-                    setTimeout(() => {
-                       card.click();
-                    }, index * 200); // Stagger clicks slightly (200ms apart)
-                });
+            if (isNextDay) {
+                 // console.log("AutoGrind: Filtering out (next day card):", card.getAttribute('aria-label') || card.href);
+                 return false; // Filter out next day card
+            } else {
+                 // console.log("AutoGrind: Keeping card (today's daily set):", card.getAttribute('aria-label') || card.href);
+                 return true; // Keep today's daily set card
+            }
+        });
 
-                 console.log("AutoGrind: Finished iterating through cards to click.");
+        console.log(`AutoGrind: Found ${cardsToClick.length} cards to click after filtering.`);
 
-            }, 4000); // Wait 4 seconds after load before running the logic
-        };
+        if (cardsToClick.length === 0) {
+             console.log("AutoGrind: No cards left to click after filtering for next day items.");
+             return;
+        }
+
+        // Now, iterate only over the filtered cards
+        cardsToClick.forEach((card, index) => {
+            console.log(`AutoGrind: Clicking eligible reward card ${index + 1}/${cardsToClick.length}:`, card.getAttribute('aria-label') || card.href);
+            // Check if addTabToClose exists and is a function before calling
+            if (typeof addTabToClose === 'function') {
+                 addTabToClose(card.href); // Keep adding to close list if needed
+            } else {
+                 console.error("AutoGrind: addTabToClose function not found!");
+            }
+            // Use a small delay between clicks if opening multiple tabs quickly causes issues
+            // Ensure click happens even if addTabToClose fails
+            try {
+                setTimeout(() => {
+                   card.click();
+                }, index * 300); // Stagger clicks slightly (300ms apart)
+            } catch (e) {
+                console.error(`AutoGrind: Error clicking card ${index + 1}:`, e);
+            }
+        });
+
+         console.log("AutoGrind: Finished iterating through cards to click.");
     }
-}
+
+    function checkForCards() {
+        console.log("AutoGrind: Checking for reward cards appearance...");
+        // Check if *at least one* card container or clickable link exists.
+        // Be reasonably specific - look for a known container or the card links themselves.
+        const cardsContainer = document.querySelector("mee-rewards-daily-set-item-content, mee-card[priority='1']"); // Check for daily set containers or other high-priority cards
+        const clickableCards = document.querySelector("a.ds-card-sec, mee-card[priority='1'] a"); // Check for the actual links
+
+        if (cardsContainer || clickableCards) {
+            console.log("AutoGrind: Reward card elements detected. Waiting 1 second for attributes/icons to potentially settle, then processing.");
+            clearTimeout(checkTimer); // Stop the polling
+            // Add a small final delay just in case attributes/icons load slightly after the container
+            setTimeout(processRewardCards, 1000);
+        } else {
+            timeWaited += checkInterval;
+            if (timeWaited >= maxWaitTime) {
+                console.error(`AutoGrind: Timed out after ${maxWaitTime / 1000} seconds waiting for reward cards to appear.`);
+                clearTimeout(checkTimer); // Stop the polling
+            } else {
+                // Schedule the next check
+                checkTimer = setTimeout(checkForCards, checkInterval);
+            }
+        }
+    }
+
+    // Start the initial check
+    console.log("AutoGrind: Initializing reward card check...");
+    checkTimer = setTimeout(checkForCards, checkInterval); // Start polling
+
+} // End of if (isRewardPage && COLLECT_DAILY_ACTIVITY)
 
 
 
