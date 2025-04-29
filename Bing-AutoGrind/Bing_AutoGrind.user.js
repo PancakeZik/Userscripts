@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
-// @version      5.3.6
+// @version      5.3.7
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
 // @author       Jery (modified by JP)
@@ -612,36 +612,69 @@ function countdownTimer(count) {
  */
 if (isRewardPage) {
     if (COLLECT_DAILY_ACTIVITY) {
-        // Wait for the page to load the point cards first
+        // Use a setTimeout after window.onload to give dynamic content more time to render
         window.onload = () => {
-            // Select all potentially clickable, uncompleted cards
-            const allPotentialCards = document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium)");
+            console.log("AutoGrind: Rewards page loaded. Waiting 3 seconds for dynamic content...");
+            setTimeout(() => {
+                console.log("AutoGrind: Starting card search...");
+                // Select all potentially clickable, uncompleted cards
+                const allPotentialCards = document.querySelectorAll("a.ds-card-sec:has(span.mee-icon-AddMedium)");
+                console.log(`AutoGrind: Found ${allPotentialCards.length} potential cards with the Add icon.`);
 
-            // Filter out the cards that are part of the next day's set
-            const cardsToClick = Array.from(allPotentialCards).filter(card => {
-                // Find the closest ancestor element that has an 'item' attribute starting with '$ctrl.dailySets['
-                // This attribute is usually on the 'mee-rewards-daily-set-item-content' element
-                const itemAncestor = card.closest("[item^='$ctrl.dailySets[']");
-
-                // If there's no such ancestor, it's not a daily set item, so we should click it.
-                if (!itemAncestor) {
-                    return true;
+                if (allPotentialCards.length === 0) {
+                    console.log("AutoGrind: No cards found to click. Either all done or elements haven't rendered correctly.");
+                    return; // Exit if nothing found
                 }
 
-                // If there is an ancestor, get its 'item' attribute value
-                const itemValue = itemAncestor.getAttribute('item');
+                // Filter out the cards that are part of the next day's set
+                const cardsToClick = Array.from(allPotentialCards).filter(card => {
+                    // Find the closest ancestor element that has an 'item' attribute
+                    // Use a more specific selector if possible, like 'mee-rewards-daily-set-item-content'
+                    const itemAncestor = card.closest("mee-rewards-daily-set-item-content[item]"); // Be more specific
 
-                // Check if the item value starts with '$ctrl.dailySets[1]' (indicating next day)
-                // If it does, we return false to filter it out. Otherwise (e.g., starts with [0] or something else), return true.
-                return !(itemValue && itemValue.startsWith('$ctrl.dailySets[1]'));
-            });
+                    // If there's no such ancestor, it's likely not a daily set item (e.g., punch card, other activity)
+                    // We definitely want to click these.
+                    if (!itemAncestor) {
+                        // console.log("AutoGrind: Keeping card (not a daily set item):", card.getAttribute('aria-label') || card.href);
+                        return true;
+                    }
 
-            // Now, iterate only over the filtered cards
-            cardsToClick.forEach((card) => {
-                console.log("AutoGrind: Clicking eligible reward card:", card.getAttribute('aria-label') || card.href); // Optional logging
-                addTabToClose(card.href);
-                card.click();
-            });
+                    // If there is an ancestor, get its 'item' attribute value
+                    const itemValue = itemAncestor.getAttribute('item');
+                    // console.log(`AutoGrind: Checking card item value: ${itemValue} for card:`, card.getAttribute('aria-label') || card.href);
+
+                    // IMPORTANT: Check if itemValue is not null and actually starts with '$ctrl.dailySets[1]' (NO single quotes inside)
+                    const isNextDay = itemValue && itemValue.startsWith('$ctrl.dailySets[1]');
+
+                    if (isNextDay) {
+                         // console.log("AutoGrind: Filtering out (next day card):", card.getAttribute('aria-label') || card.href);
+                         return false; // Filter out next day card
+                    } else {
+                         // console.log("AutoGrind: Keeping card (today's daily set or other):", card.getAttribute('aria-label') || card.href);
+                         return true; // Keep today's card or any other structure
+                    }
+                });
+
+                console.log(`AutoGrind: Found ${cardsToClick.length} cards to click after filtering.`);
+
+                // Now, iterate only over the filtered cards
+                cardsToClick.forEach((card, index) => {
+                    console.log(`AutoGrind: Clicking eligible reward card ${index + 1}/${cardsToClick.length}:`, card.getAttribute('aria-label') || card.href);
+                    // Check if addTabToClose exists and is a function before calling
+                    if (typeof addTabToClose === 'function') {
+                         addTabToClose(card.href); // Keep adding to close list if needed
+                    } else {
+                         console.error("AutoGrind: addTabToClose function not found!");
+                    }
+                    // Use a small delay between clicks if opening multiple tabs quickly causes issues
+                    setTimeout(() => {
+                       card.click();
+                    }, index * 200); // Stagger clicks slightly (200ms apart)
+                });
+
+                 console.log("AutoGrind: Finished iterating through cards to click.");
+
+            }, 4000); // Wait 4 seconds after load before running the logic
         };
     }
 }
