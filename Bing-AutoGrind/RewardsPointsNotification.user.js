@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bing Rewards Point Breakdown Notifier
 // @namespace    http://tampermonkey.net/
-// @version      0.5 // Incremented version
+// @version      0.6 // Incremented version
 // @description  Extracts PC and Mobile points, account name, from Bing Rewards page and sends a Pushover notification. Keys are configurable.
 // @author       Joao
 // @match        https://rewards.bing.com/pointsbreakdown*
@@ -146,10 +146,12 @@
             return;
         }
 
-        // Get account name early (it should be available if other elements are)
         const accountFirstName = getAccountFirstName();
         console.log("Account Name Detected:", accountFirstName);
 
+        // Define fixed maximums
+        const MAX_PC_POINTS = 90;
+        const MAX_MOBILE_POINTS = 60;
 
         const maxWaitTime = 30000;
         const checkInterval = 500;
@@ -167,8 +169,8 @@
                     clearInterval(intervalId);
                     notificationSentThisSession = true;
 
-                    const lastNotificationKey = `lastPointsNotification_${accountFirstName}_PointsNotifier`; // Make storage key account-specific
-                    const currentPointsString = `PC:${pcPoints},Mobile:${mobilePoints}`;
+                    const lastNotificationKey = `lastPointsNotification_${accountFirstName}_PointsNotifier`;
+                    const currentPointsString = `PC:${pcPoints},Mobile:${mobilePoints}`; // This string for comparison doesn't need the max
                     const lastPointsString = GM_getValue(lastNotificationKey, "");
 
                     if (currentPointsString === lastPointsString) {
@@ -176,12 +178,13 @@
                         return;
                     }
 
-                    // MODIFIED: Include account name in the message and title
+                    // MODIFIED: Include account name in the title and max points in the message
                     const title = `Bing Points (${accountFirstName})`;
-                    const message = `PC Search: ${pcPoints} pts\nMobile Search: ${mobilePoints} pts`;
+                    // UPDATED MESSAGE STRING
+                    const message = `PC Search: ${pcPoints} / ${MAX_PC_POINTS} pts\nMobile Search: ${mobilePoints} / ${MAX_MOBILE_POINTS} pts`;
 
                     sendPushoverNotification(configuredUserKey, configuredApiToken, message, title);
-                    GM_setValue(lastNotificationKey, currentPointsString);
+                    GM_setValue(lastNotificationKey, currentPointsString); // Store only earned points for change detection
 
                 } else if (elapsedTime >= maxWaitTime) {
                     clearInterval(intervalId);
