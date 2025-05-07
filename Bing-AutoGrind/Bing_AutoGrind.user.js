@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
-// @version      5.3.9
+// @version      5.4.0
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
 // @author       Jery (modified by JP)
@@ -436,6 +436,48 @@ function addTabToClose(tab, timeout=5000) {
  * put inside [pointsElem]
  * In case of mobile, the script skips searching for the element.
  */
+if (window.location.href.startsWith("https://www.bing.com/") &&
+    window.location.href.includes("?form=STARTSCRIPT") &&
+    !isRewardPage) { // Ensure it's the base Bing URL with STARTSCRIPT
+
+    console.log("AutoGrind: STARTSCRIPT detected on Bing homepage. Initializing searches.");
+
+    // 1. Reset/Initialize searches array specifically for this startup
+    let initialSearches = [];
+    GM_setValue("searches", []); // Clear any old leftover searches in storage
+    GM_setValue("tabsToClose", []); // Clear any old tabs to close
+
+    // 2. Populate with fallback terms
+    initialSearches = getFallbackSearchTerms().slice(0, MAX_SEARCHES);
+
+    if (initialSearches.length > 0) {
+        console.log("AutoGrind: Generated initial fallback searches:", initialSearches);
+
+        // 3. Get the VERY FIRST search term
+        const firstSearchTerm = initialSearches.pop(); // Take one off for the immediate search
+        GM_setValue("searches", initialSearches);    // Save the REST of the searches for subsequent steps
+
+        // 4. Construct the first search URL
+        const firstSearchUrl = `https://www.bing.com/search?go=Search&q=${encodeURIComponent(firstSearchTerm)}&qs=ds&form=QBRE`;
+        console.log("AutoGrind: Navigating to first search:", firstSearchUrl);
+
+        // 5. Navigate!
+        window.location.href = firstSearchUrl;
+
+        // 6. IMPORTANT: Stop further script execution on *this* homepage load.
+        // The script will re-run on the new search page.
+        // We MUST throw an error or return to prevent the rest of the script from trying to run on the homepage.
+        // A simple return might not be enough if Tampermonkey tries to continue. Throwing a specific error is more robust.
+        throw new Error("AutoGrind: STARTSCRIPT homepage navigation initiated. Halting script on this page.");
+
+    } else {
+        console.warn("AutoGrind: STARTSCRIPT on homepage - MAX_SEARCHES is likely 0 or fallback terms failed. No searches to perform.");
+        // Potentially hide the stop icon if it was made visible by other logic
+        if (document.querySelector(".stop-icon")) {
+             document.querySelector(".stop-icon").style.display = "none";
+        }
+    }
+}
 try {
     /**
      * If the current URL contains the "&form=STARTSCRIPT" parameter,
