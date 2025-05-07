@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JP - AutoGrind: Intelligent Bing Rewards Auto-Grinder
 // @namespace    https://github.com/jeryjs/
-// @version      5.3.8
+// @version      5.3.9
 // @description  This user script automatically finds random words from the current search results and searches Bing with them. Additionally, it auto clicks the unclaimed daily points from your rewards dashboard too.
 // @icon         https://www.bing.com/favicon.ico
 // @author       Jery (modified by JP)
@@ -437,6 +437,19 @@ function addTabToClose(tab, timeout=5000) {
  * In case of mobile, the script skips searching for the element.
  */
 try {
+    /**
+     * If the current URL contains the "&form=STARTSCRIPT" parameter,
+     * the script automatically extracts words from the page and starts the search.
+     * This allows starting from the homepage or any Bing page.
+     */
+    if (window.location.href.includes("&form=STARTSCRIPT") && !isRewardPage) { // also ensure not on rewards page
+        console.log("AutoGrind: STARTSCRIPT parameter detected, initiating search sequence.");
+        startSearch();
+        // startSearch() will navigate, so further execution on *this specific page load* might be moot
+        // depending on how fast the navigation happens.
+        // We might not even reach the isSearchPage block below on this initial trigger.
+    }
+    // --- END OF NEW BLOCK ---
 // FIRST CHECK: Detect if we're stuck on the Bing home page
 if (window.location.href.startsWith("https://www.bing.com/?scope=web&cc=GB&FORM=QBRE")) {
     // Only act if we have remaining searches
