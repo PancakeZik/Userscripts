@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Bing Rewards Point Breakdown Notifier
 // @namespace    http://tampermonkey.net/
-// @version      0.4 // Incremented version
-// @description  Extracts PC and Mobile points from Bing Rewards points breakdown page and sends a Pushover notification. Keys are configurable.
+// @version      0.5 // Incremented version
+// @description  Extracts PC and Mobile points, account name, from Bing Rewards page and sends a Pushover notification. Keys are configurable.
 // @author       Joao
 // @match        https://rewards.bing.com/pointsbreakdown*
 // @grant        GM.xmlHttpRequest
@@ -16,15 +16,16 @@
 (function() {
     'use strict';
 
-    // Constants for storage keys
+    // Constants for storage keys (remain the same)
     const PUSHOVER_USER_KEY_STORAGE_ID = "pushoverUserKey_PointsNotifier";
     const PUSHOVER_API_TOKEN_STORAGE_ID = "pushoverApiToken_PointsNotifier";
 
     let configuredUserKey = null;
     let configuredApiToken = null;
 
-    // --- Configuration Function ---
+    // Configuration Function (remains the same)
     function getConfiguredKey(storageId, promptMessage, isSensitive = false) {
+        // ... (same as before)
         let keyValue = GM_getValue(storageId, null);
         if (!keyValue) {
             keyValue = prompt(promptMessage);
@@ -40,22 +41,34 @@
     }
 
     function initializeKeys() {
+        // ... (same as before)
         configuredUserKey = getConfiguredKey(PUSHOVER_USER_KEY_STORAGE_ID, "Pushover Notifier: Please enter your Pushover User Key:");
-        if (!configuredUserKey) return false; // Stop if first key fails
+        if (!configuredUserKey) return false;
 
         configuredApiToken = getConfiguredKey(PUSHOVER_API_TOKEN_STORAGE_ID, "Pushover Notifier: Please enter your Pushover Application API Token:", true);
-        if (!configuredApiToken) return false; // Stop if second key fails
+        if (!configuredApiToken) return false;
 
         return true;
     }
 
-    // --- Pushover Notification Function ---
-    // Now accepts userKey and apiToken as arguments
+    // --- NEW: Function to get account name ---
+    function getAccountFirstName() {
+        const nameElement = document.getElementById("redirect_info_link");
+        if (nameElement && nameElement.textContent) {
+            const fullName = nameElement.textContent.trim();
+            if (fullName) {
+                return fullName.split(" ")[0]; // Get the first word
+            }
+        }
+        return "Account"; // Default if name not found or empty
+    }
+
+
+    // --- Pushover Notification Function (remains largely the same) ---
     function sendPushoverNotification(userKey, apiToken, message, title = "Bing Rewards Update") {
+        // ... (same as before, the message string itself will now contain the account name)
         if (!userKey || !apiToken) {
             console.error("Pushover User Key or API Token is missing. Cannot send notification. Please configure them via the script menu.");
-            // Alerting here might be too noisy if called frequently without keys
-            // alert("Pushover keys not configured. Please use the script menu command to set them.");
             return;
         }
 
@@ -63,7 +76,7 @@
         const params = new URLSearchParams();
         params.append("token", apiToken);
         params.append("user", userKey);
-        params.append("message", message);
+        params.append("message", message); // The message will now include the account name
         if (title) {
             params.append("title", title);
         }
@@ -74,10 +87,8 @@
             method: "POST",
             url: pushoverUrl,
             data: params.toString(),
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            onload: function(response) {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            onload: function(response) { /* ... same error handling ... */
                 if (response.status === 200) {
                     try {
                         const responseData = JSON.parse(response.responseText);
@@ -96,7 +107,7 @@
                     alert("Pushover request failed. HTTP Status: " + response.status + ". Check API token/user key, and console.");
                 }
             },
-            onerror: function(response) {
+            onerror: function(response) { /* ... same error handling ... */
                 console.error("Pushover request network error:", response);
                 alert("Pushover request network error. Check console and network connection.");
             }
@@ -105,6 +116,7 @@
 
     // --- Point Extraction Logic (remains the same) ---
     function extractPointsData() {
+        // ... (same as before)
         const pointsCards = document.querySelectorAll('.pointsBreakdownCard');
         let pcPoints = null;
         let mobilePoints = null;
@@ -129,12 +141,15 @@
 
     // --- Main Logic: Wait for elements and process ---
     function waitForElementsAndProcess() {
-        // First, ensure keys are configured or prompt for them
         if (!initializeKeys()) {
             console.warn("Pushover keys not configured. Script will not send notifications until keys are set via the menu command.");
-            // No need to alert here, initializeKeys already does if input is cancelled/empty
-            return; // Stop processing if keys aren't set up
+            return;
         }
+
+        // Get account name early (it should be available if other elements are)
+        const accountFirstName = getAccountFirstName();
+        console.log("Account Name Detected:", accountFirstName);
+
 
         const maxWaitTime = 30000;
         const checkInterval = 500;
@@ -152,37 +167,39 @@
                     clearInterval(intervalId);
                     notificationSentThisSession = true;
 
-                    const lastNotificationKey = "lastPointsNotification_PointsNotifier";
+                    const lastNotificationKey = `lastPointsNotification_${accountFirstName}_PointsNotifier`; // Make storage key account-specific
                     const currentPointsString = `PC:${pcPoints},Mobile:${mobilePoints}`;
                     const lastPointsString = GM_getValue(lastNotificationKey, "");
 
                     if (currentPointsString === lastPointsString) {
-                        console.log("Points are the same as last notification. Skipping Pushover.");
+                        console.log(`(${accountFirstName}) Points are the same as last notification. Skipping Pushover.`);
                         return;
                     }
 
-                    const message = `PC Search: ${pcPoints} points\nMobile Search: ${mobilePoints} points`;
-                    // Pass the configured keys to sendPushoverNotification
-                    sendPushoverNotification(configuredUserKey, configuredApiToken, message, "Bing Points Update");
+                    // MODIFIED: Include account name in the message and title
+                    const title = `Bing Points (${accountFirstName})`;
+                    const message = `PC Search: ${pcPoints} pts\nMobile Search: ${mobilePoints} pts`;
+
+                    sendPushoverNotification(configuredUserKey, configuredApiToken, message, title);
                     GM_setValue(lastNotificationKey, currentPointsString);
 
                 } else if (elapsedTime >= maxWaitTime) {
                     clearInterval(intervalId);
-                    console.warn("Timed out: Cards were found, but could not extract both PC and Mobile points within time. Partial data:", { pcPoints, mobilePoints });
+                    console.warn(`(${accountFirstName}) Timed out: Cards were found, but could not extract both PC and Mobile points. Partial data:`, { pcPoints, mobilePoints });
                 }
             } else if (elapsedTime >= maxWaitTime) {
                 clearInterval(intervalId);
                 if (!notificationSentThisSession) {
-                    console.warn("Timed out waiting for sufficient point breakdown cards to populate or for parsing to succeed.");
+                    console.warn(`(${accountFirstName}) Timed out waiting for sufficient point breakdown cards or for parsing to succeed.`);
                 }
             }
         }, checkInterval);
     }
 
-    // --- Script Menu Command for Reconfiguration ---
+    // --- Script Menu Command for Reconfiguration (remains the same) ---
     function reconfigurePushoverKeys() {
+        // ... (same as before)
         alert("You will be prompted to re-enter your Pushover User Key and API Token.");
-        // Clear existing stored values so getConfiguredKey prompts again
         GM_setValue(PUSHOVER_USER_KEY_STORAGE_ID, null);
         GM_setValue(PUSHOVER_API_TOKEN_STORAGE_ID, null);
 
@@ -191,19 +208,14 @@
         } else {
             alert("Pushover key reconfiguration was cancelled or failed. Previous valid keys (if any) might still be in use until next full script reload, or new prompts will appear.");
         }
-        // Optional: Suggest a page reload if settings need to be immediately active for a running instance
-        // if (confirm("Reload page to apply new keys immediately?")) { window.location.reload(); }
     }
 
-    // Register the menu command
     if (typeof GM_registerMenuCommand === "function") {
         GM_registerMenuCommand("Configure Pushover Keys (Points Notifier)", reconfigurePushoverKeys, "c");
     }
 
-
     // --- Start the process ---
     console.log("Bing Rewards Point Breakdown Notifier script started.");
-    // The keys will be checked/prompted inside waitForElementsAndProcess
     waitForElementsAndProcess();
 
 })();
