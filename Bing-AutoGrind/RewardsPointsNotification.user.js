@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Bing Rewards Point Breakdown Notifier
 // @namespace    http://tampermonkey.net/
-// @version      0.8 // Incremented version
+// @version      0.8.1 // Incremented version
 // @description  Extracts PC/Mobile points, daily set status, account name, from Bing Rewards and sends a Pushover notification.
 // @author       Joao
-// @match        https://rewards.bing.com/*
+// @match        https://rewards.bing.com/pointsbreakdown
 // @grant        GM.xmlHttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
